@@ -13,49 +13,45 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1️⃣ Baixar o código do repositório
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Configurar Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3️⃣ Instalar dependências Python
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
-      # 4️⃣ Build do app principal
       - name: Build SekaiTranslator
         run: |
           python -m PyInstaller main.py --noconsole --name SekaiTranslator
 
-      # 5️⃣ Build do updater
       - name: Build updater
         run: |
           python -m PyInstaller updater.py --noconsole --name updater
 
-      # 6️⃣ Copiar updater.exe para dentro do app
       - name: Copy updater into app folder
         run: |
           copy dist\updater\updater.exe dist\SekaiTranslator\updater.exe
 
-      # 7️⃣ INSTALAR INNO SETUP (AQUI!)
+      - name: Verify dist folder
+        run: |
+          dir dist
+          dir dist\SekaiTranslator
+
       - name: Install Inno Setup
         run: |
           choco install innosetup -y
 
-      # 8️⃣ COMPILAR O INSTALADOR
       - name: Build installer
         run: |
-          iscc installer.iss
+          iscc installer.iss || exit 1
 
-      # 9️⃣ PUBLICAR NO RELEASE
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
