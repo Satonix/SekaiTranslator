@@ -13,61 +13,61 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1️⃣ Baixa o código do repositório
+      # 1️⃣ Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Configura Python
+      # 2️⃣ Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3️⃣ Instala dependências Python
+      # 3️⃣ Dependências
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
-      # 4️⃣ Build do app principal
+      # 4️⃣ Build app
       - name: Build SekaiTranslator
         run: |
           python -m PyInstaller main.py --noconsole --name SekaiTranslator
 
-      # 5️⃣ Build do updater
+      # 5️⃣ Build updater
       - name: Build updater
         run: |
           python -m PyInstaller updater.py --noconsole --name updater
 
-      # 6️⃣ Copia o updater.exe para dentro do app
+      # 6️⃣ Copiar updater
       - name: Copy updater into app folder
         run: |
           copy dist\updater\updater.exe dist\SekaiTranslator\updater.exe
 
-      # 7️⃣ Verificação (debug silencioso, mas útil)
+      # 7️⃣ Verificação
       - name: Verify dist folder
         run: |
           dir dist
           dir dist\SekaiTranslator
 
-      # 8️⃣ Instala o Inno Setup
+      # 8️⃣ Instalar Inno Setup
       - name: Install Inno Setup
         run: |
           choco install innosetup -y
 
-      # 9️⃣ CRIA A PASTA DE SAÍDA DO INSTALADOR (PASSO CRÍTICO)
+      # 9️⃣ Criar pasta de saída
       - name: Create installer output folder
         run: |
           mkdir installer
 
-      # 🔟 Compila o instalador
+      # 🔟 Compilar instalador
       - name: Build installer
         run: |
           iscc installer.iss
 
-      # 1️⃣1️⃣ Publica o instalador no Release
+      # 1️⃣1️⃣ Publicar no Release  ✅ AQUI ESTÁ A CORREÇÃO
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: installer\SekaiTranslator_Setup.exe
+          files: installer/SekaiTranslator_Setup.exe
