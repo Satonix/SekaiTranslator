@@ -1,0 +1,40 @@
+name: Build SekaiTranslator
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build app
+        run: |
+          python -m PyInstaller main.py --noconsole --name SekaiTranslator
+
+      - name: Build updater
+        run: |
+          python -m PyInstaller updater.py --noconsole --name updater
+
+      - name: Copy updater
+        run: |
+          copy dist\updater\updater.exe dist\SekaiTranslator\updater.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist\SekaiTranslator\SekaiTranslator.exe
