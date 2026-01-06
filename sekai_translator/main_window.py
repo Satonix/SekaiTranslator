@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Dict
 
 import sys
-import tempfile
 import subprocess
 
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QSettings
@@ -19,8 +18,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QTableView,
-    QProgressDialog,
-    QApplication,
 )
 
 from sekai_translator import __app_name__, __version__
@@ -120,29 +117,20 @@ class FileTab(QWidget):
         splitter = QSplitter(Qt.Vertical)
         layout.addWidget(splitter)
 
-        # ---------------- TABELA ----------------
-
         self.table = TranslationTableView()
         self.model = TranslationTableModel(self.all_entries)
         self.table.setModel(self.model)
-
-        self.table.setFocusPolicy(Qt.StrongFocus)
-        self.table.setFocus()
 
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.Stretch)
 
-        # ---------------- EDITOR ----------------
-
         self.editor = EditorPanel(self.project)
 
         splitter.addWidget(self.table)
         splitter.addWidget(self.editor)
         splitter.setSizes([360, 540])
-
-        # ---------------- SIGNALS ----------------
 
         self.table.selectionModel().selectionChanged.connect(
             self._on_selection_changed
@@ -155,19 +143,11 @@ class FileTab(QWidget):
 
         if self.model.rowCount() > 0:
             self.table.selectRow(0)
-            self.table.setFocus()
-
-    # --------------------------------------------------------
 
     def _on_selection_changed(self, *_):
-        rows = sorted(
-            i.row() for i in self.table.selectionModel().selectedRows()
-        )
+        rows = sorted(i.row() for i in self.table.selectionModel().selectedRows())
         if rows:
-            self.editor.set_entries(
-                [self.model.entries[r] for r in rows]
-            )
-            self.table.setFocus()
+            self.editor.set_entries([self.model.entries[r] for r in rows])
 
     def _on_entry_changed(self):
         for entry in self.editor._entries:
@@ -177,59 +157,26 @@ class FileTab(QWidget):
         self.parent.update_tab_title(self)
         self.model.refresh()
         self.parent.fs_proxy.invalidate()
-        self.table.setFocus()
-
-    # --------------------------------------------------------
 
     def _go_next(self):
         if not self.editor._entries:
             return
-
         entry = self.editor._entries[-1]
-
         try:
             row = self.model.entries.index(entry)
         except ValueError:
             return
-
-        next_row = row + 1
-        if next_row >= self.model.rowCount():
-            return
-
-        self.table.selectRow(next_row)
-        self.table.scrollTo(
-            self.model.index(next_row, 0),
-            QTableView.PositionAtCenter,
-        )
-        self.table.setFocus()
+        if row + 1 < self.model.rowCount():
+            self.table.selectRow(row + 1)
 
     def _go_prev(self):
         index = self.table.currentIndex()
-        if not index.isValid():
-            return
-
-        row = index.row() - 1
-        if row < 0:
-            return
-
-        self.table.selectRow(row)
-        self.table.scrollTo(
-            self.model.index(row, 0),
-            QTableView.PositionAtCenter,
-        )
-        self.table.setFocus()
+        if index.isValid() and index.row() > 0:
+            self.table.selectRow(index.row() - 1)
 
     def _go_next_from_model(self, row: int):
-        row += 1
-        if row >= self.model.rowCount():
-            return
-
-        self.table.selectRow(row)
-        self.table.scrollTo(
-            self.model.index(row, 0),
-            QTableView.PositionAtCenter,
-        )
-        self.table.setFocus()
+        if row + 1 < self.model.rowCount():
+            self.table.selectRow(row + 1)
 
     def mark_clean(self):
         self.dirty = False
@@ -257,21 +204,22 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._try_restore_last_project()
 
-        # 🔄 Verificação automática ao iniciar
-        self._check_for_updates()
+        # 🔄 checagem automática ao iniciar
+        self.check_for_updates(auto=True)
 
     # --------------------------------------------------------
-    # Atualização
+    # UPDATE VIA INSTALADOR
     # --------------------------------------------------------
 
-    def _check_for_updates(self):
+    def check_for_updates(self, auto: bool = False):
         info = UpdateService.check(__version__)
         if not info:
-            QMessageBox.information(
-                self,
-                "Atualizações",
-                "Você já está usando a versão mais recente.",
-            )
+            if not auto:
+                QMessageBox.information(
+                    self,
+                    "Atualizações",
+                    "Você já está usando a versão mais recente.",
+                )
             return
 
         res = QMessageBox.question(
@@ -286,88 +234,34 @@ class MainWindow(QMainWindow):
         )
 
         if res == QMessageBox.Yes:
-            self._download_and_update(info)
+            self._run_updater(info.url)
 
-    def check_for_updates_manual(self):
-        self._check_for_updates()
-
-    def _download_and_update(self, info):
-        import requests
-
-        tmp_dir = Path(tempfile.gettempdir())
-        new_exe = tmp_dir / "SekaiTranslator_new.exe"
-
-        r = requests.get(info.url, stream=True)
-        r.raise_for_status()
-
-        total = int(r.headers.get("Content-Length", 0))
-
-        progress = QProgressDialog(
-            "Baixando atualização...",
-            "Cancelar",
-            0,
-            total,
-            self,
-        )
-        progress.setWindowTitle("Atualizando")
-        progress.setMinimumDuration(0)
-        progress.setValue(0)
-
-        downloaded = 0
-
-        with open(new_exe, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if progress.wasCanceled():
-                    r.close()
-                    if new_exe.exists():
-                        new_exe.unlink()
-                    return
-
-                if not chunk:
-                    continue
-
-                f.write(chunk)
-                downloaded += len(chunk)
-                progress.setValue(downloaded)
-                QApplication.processEvents()
-
-        progress.close()
-
+    def _run_updater(self, installer_url: str):
         updater = Path(sys.executable).with_name("updater.exe")
 
-        subprocess.Popen([
-            str(updater),
-            str(new_exe),
-            sys.executable,
-        ])
+        subprocess.Popen(
+            [str(updater), installer_url],
+            shell=True,
+        )
 
         sys.exit(0)
 
     # --------------------------------------------------------
 
     def closeEvent(self, event):
-        dirty_tabs = [
-            tab for tab in self.open_tabs.values()
-            if tab.dirty
-        ]
-
+        dirty_tabs = [t for t in self.open_tabs.values() if t.dirty]
         if dirty_tabs:
             res = QMessageBox.question(
                 self,
                 "Projeto não salvo",
-                "Existem arquivos não salvos.\n\n"
-                "Deseja salvar antes de sair?",
+                "Existem arquivos não salvos.\n\nDeseja salvar antes de sair?",
                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-                QMessageBox.Yes,
             )
-
             if res == QMessageBox.Cancel:
                 event.ignore()
                 return
-
             if res == QMessageBox.Yes:
                 self.save_project()
-
         event.accept()
 
     # --------------------------------------------------------
@@ -402,37 +296,20 @@ class MainWindow(QMainWindow):
         self.tabs.setTabsClosable(True)
         splitter.addWidget(self.tabs)
 
-        splitter.setSizes([260, 1240])
-
         self.tree.doubleClicked.connect(self._on_tree_double_click)
         self.tabs.tabCloseRequested.connect(self._close_tab)
-
-    # --------------------------------------------------------
 
     def _build_menu(self):
         menu = self.menuBar().addMenu("Arquivo")
 
-        open_action = QAction("Abrir Projeto...", self)
-        open_action.triggered.connect(self.open_project)
-        menu.addAction(open_action)
-
-        create_action = QAction("Criar Projeto...", self)
-        create_action.triggered.connect(self.create_project)
-        menu.addAction(create_action)
-
-        save_action = QAction("Salvar Projeto", self)
-        save_action.triggered.connect(self.save_project)
-        menu.addAction(save_action)
-
-        export_action = QAction("Exportar Arquivo Atual", self)
-        export_action.triggered.connect(self.export_current_file)
-        menu.addAction(export_action)
+        menu.addAction("Abrir Projeto...", self.open_project)
+        menu.addAction("Criar Projeto...", self.create_project)
+        menu.addAction("Salvar Projeto", self.save_project)
+        menu.addAction("Exportar Arquivo Atual", self.export_current_file)
 
         menu.addSeparator()
 
-        update_action = QAction("Verificar atualizações", self)
-        update_action.triggered.connect(self.check_for_updates_manual)
-        menu.addAction(update_action)
+        menu.addAction("Verificar atualizações", self.check_for_updates)
 
     # --------------------------------------------------------
 
@@ -443,8 +320,6 @@ class MainWindow(QMainWindow):
                 self._load_project(last)
             except Exception:
                 pass
-
-    # --------------------------------------------------------
 
     def open_project(self):
         dlg = OpenProjectDialog(self)
@@ -473,19 +348,13 @@ class MainWindow(QMainWindow):
         self.tabs.clear()
         self.open_tabs.clear()
 
-    # --------------------------------------------------------
-
     def _on_tree_double_click(self, proxy_index):
         if not self.project:
             return
-
         src = self.fs_proxy.mapToSource(proxy_index)
         path = self.fs_model.filePath(src)
-
-        if Path(path).is_dir():
-            return
-
-        self._open_file(path)
+        if not Path(path).is_dir():
+            self._open_file(path)
 
     def _open_file(self, path: str):
         if path in self.open_tabs:
@@ -501,8 +370,6 @@ class MainWindow(QMainWindow):
 
         self.fs_proxy.set_active_path(path)
 
-    # --------------------------------------------------------
-
     def update_tab_title(self, tab: FileTab):
         idx = self.tabs.indexOf(tab)
         if idx != -1:
@@ -514,31 +381,26 @@ class MainWindow(QMainWindow):
         self.open_tabs.pop(tab.file_path, None)
         self.tabs.removeTab(index)
 
-    # --------------------------------------------------------
-
     def save_project(self):
         if not self.project:
             return
-
         save_project(self.project)
         for tab in self.open_tabs.values():
             tab.mark_clean()
-
-    # --------------------------------------------------------
 
     def export_current_file(self):
         tab = self.tabs.currentWidget()
         if not tab or not self.project:
             return
 
-        critical_errors = [
+        critical = [
             issue
             for entry in tab.all_entries
             for issue in entry.qa_issues
             if issue.level == "error"
         ]
 
-        if critical_errors:
+        if critical:
             QMessageBox.critical(
                 self,
                 "Erro crítico de QA",
