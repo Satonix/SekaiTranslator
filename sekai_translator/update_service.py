@@ -4,7 +4,7 @@ from packaging.version import Version
 
 # 🔴 TROQUE PELO SEU REPOSITÓRIO REAL
 VERSION_URL = (
-    "https://raw.githubusercontent.com/SEU_USUARIO/SEU_REPO/main/version.json"
+    "https://raw.githubusercontent.com/Satonix/SekaiTranslator/main/version.json"
 )
 
 
@@ -36,3 +36,4 @@ class UpdateService:
             return None
 
         return None
+
