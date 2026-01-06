@@ -3,6 +3,11 @@ import subprocess
 import requests
 from pathlib import Path
 
+import time
+
+# depois de chamar o instalador
+time.sleep(3)
+
 
 def download_installer(url: str, out_path: Path):
     with requests.get(url, stream=True) as r:
@@ -34,3 +39,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
