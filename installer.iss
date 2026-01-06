@@ -13,6 +13,9 @@ SolidCompression=yes
 PrivilegesRequired=lowest
 UsePreviousAppDir=yes
 
+CloseApplications=yes
+RestartApplications=no
+
 OutputDir=installer
 OutputBaseFilename=SekaiTranslator_Setup
 
@@ -29,6 +32,7 @@ Name: "{userdesktop}\SekaiTranslator"; Filename: "{app}\SekaiTranslator.exe"
 
 [Run]
 Filename: "{app}\SekaiTranslator.exe"; Description: "Iniciar SekaiTranslator"; Flags: nowait postinstall skipifsilent
+
 
 
 
