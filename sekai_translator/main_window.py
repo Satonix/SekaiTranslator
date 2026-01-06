@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHeaderView,
     QLabel,
-    QTableView,
 )
 
 from sekai_translator import __app_name__, __version__
@@ -204,73 +203,15 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._try_restore_last_project()
 
-        # 🔄 checagem automática ao iniciar
         self.check_for_updates(auto=True)
-
-    # --------------------------------------------------------
-    # UPDATE VIA INSTALADOR (CORRETO)
-    # --------------------------------------------------------
-
-    def check_for_updates(self, auto: bool = False):
-        info = UpdateService.check(__version__)
-        if not info:
-            if not auto:
-                QMessageBox.information(
-                    self,
-                    "Atualizações",
-                    "Você já está usando a versão mais recente.",
-                )
-            return
-
-        res = QMessageBox.question(
-            self,
-            "Atualização disponível",
-            f"Uma nova versão do {__app_name__} está disponível.\n\n"
-            f"Versão atual: {__version__}\n"
-            f"Nova versão: {info.version}\n\n"
-            f"Deseja atualizar agora?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-
-        if res == QMessageBox.Yes:
-            self._run_updater(info.url)
-
-    def _run_updater(self, installer_url: str):
-        updater = Path(sys.executable).with_name("updater.exe")
-
-        subprocess.Popen(
-            [str(updater), installer_url],
-            shell=True,
-        )
-
-        # fecha o app para liberar arquivos
-        sys.exit(0)
-
-    # --------------------------------------------------------
-
-    def closeEvent(self, event):
-        dirty_tabs = [t for t in self.open_tabs.values() if t.dirty]
-        if dirty_tabs:
-            res = QMessageBox.question(
-                self,
-                "Projeto não salvo",
-                "Existem arquivos não salvos.\n\nDeseja salvar antes de sair?",
-                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-            )
-            if res == QMessageBox.Cancel:
-                event.ignore()
-                return
-            if res == QMessageBox.Yes:
-                self.save_project()
-        event.accept()
 
     # --------------------------------------------------------
 
     def _build_ui(self):
-        splitter = QSplitter(Qt.Horizontal)
-        self.setCentralWidget(splitter)
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.setCentralWidget(self.main_splitter)
 
+        # ---------------- Tree ----------------
         tree_container = QWidget()
         tree_layout = QVBoxLayout(tree_container)
         tree_layout.setContentsMargins(6, 6, 6, 6)
@@ -286,19 +227,26 @@ class MainWindow(QMainWindow):
         self.tree.setModel(self.fs_proxy)
         self.tree.setHeaderHidden(True)
         self.tree.setEnabled(False)
+        self.tree.setMinimumWidth(220)
+        self.tree.setMaximumWidth(400)
 
         for i in range(1, 4):
             self.tree.hideColumn(i)
 
         tree_layout.addWidget(self.tree)
-        splitter.addWidget(tree_container)
+        self.main_splitter.addWidget(tree_container)
 
+        # ---------------- Tabs ----------------
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
-        splitter.addWidget(self.tabs)
+        self.main_splitter.addWidget(self.tabs)
+
+        self.main_splitter.setSizes([300, 1200])
 
         self.tree.doubleClicked.connect(self._on_tree_double_click)
         self.tabs.tabCloseRequested.connect(self._close_tab)
+
+    # --------------------------------------------------------
 
     def _build_menu(self):
         menu = self.menuBar().addMenu("Arquivo")
@@ -309,7 +257,6 @@ class MainWindow(QMainWindow):
         menu.addAction("Exportar Arquivo Atual", self.export_current_file)
 
         menu.addSeparator()
-
         menu.addAction("Verificar atualizações", self.check_for_updates)
 
     # --------------------------------------------------------
@@ -321,6 +268,8 @@ class MainWindow(QMainWindow):
                 self._load_project(last)
             except Exception:
                 pass
+
+    # --------------------------------------------------------
 
     def open_project(self):
         dlg = OpenProjectDialog(self)
@@ -342,12 +291,20 @@ class MainWindow(QMainWindow):
 
         self.fs_proxy.set_project(self.project)
         self.tree.setEnabled(True)
+
         self.tree_header.setText(
             f"{self.project.name}  [lang={self.project.language}]"
         )
 
         self.tabs.clear()
         self.open_tabs.clear()
+
+        self.settings.setValue("last_project_path", path)
+
+        # 🔥 FIX REAL: reaplica após QFileSystemModel recalcular layout
+        self.main_splitter.setSizes([300, 1200])
+
+    # --------------------------------------------------------
 
     def _on_tree_double_click(self, proxy_index):
         if not self.project:
@@ -371,6 +328,8 @@ class MainWindow(QMainWindow):
 
         self.fs_proxy.set_active_path(path)
 
+    # --------------------------------------------------------
+
     def update_tab_title(self, tab: FileTab):
         idx = self.tabs.indexOf(tab)
         if idx != -1:
@@ -381,6 +340,8 @@ class MainWindow(QMainWindow):
         tab: FileTab = self.tabs.widget(index)
         self.open_tabs.pop(tab.file_path, None)
         self.tabs.removeTab(index)
+
+    # --------------------------------------------------------
 
     def save_project(self):
         if not self.project:
@@ -420,3 +381,43 @@ class MainWindow(QMainWindow):
             "Exportação concluída",
             f"Arquivo exportado:\n{out}",
         )
+
+    # --------------------------------------------------------
+    # UPDATE VIA INSTALADOR
+    # --------------------------------------------------------
+
+    def check_for_updates(self, auto: bool = False):
+        info = UpdateService.check(__version__)
+        if not info:
+            if not auto:
+                QMessageBox.information(
+                    self,
+                    "Atualizações",
+                    "Você já está usando a versão mais recente.",
+                )
+            return
+
+        res = QMessageBox.question(
+            self,
+            "Atualização disponível",
+            f"Uma nova versão do {__app_name__} está disponível.\n\n"
+            f"Versão atual: {__version__}\n"
+            f"Nova versão: {info.version}\n\n"
+            f"Deseja atualizar agora?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+
+        if res == QMessageBox.Yes:
+            self._run_updater(info.url)
+
+    def _run_updater(self, installer_url: str):
+        updater = Path(sys.executable).with_name("updater.exe")
+
+        subprocess.Popen(
+            [str(updater), installer_url],
+            shell=True,
+        )
+
+        # fecha o app para liberar arquivos
+        sys.exit(0)
