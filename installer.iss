@@ -1,6 +1,6 @@
 [Setup]
 AppName=SekaiTranslator
-AppVersion=0.3.0
+AppVersion=0.3.1-alpha
 DefaultDirName={localappdata}\Programs\SekaiTranslator
 DefaultGroupName=SekaiTranslator
 UninstallDisplayIcon={app}\SekaiTranslator.exe
@@ -19,3 +19,4 @@ Name: "{userdesktop}\SekaiTranslator"; Filename: "{app}\SekaiTranslator.exe"
 
 [Run]
 Filename: "{app}\SekaiTranslator.exe"; Description: "Iniciar SekaiTranslator"; Flags: nowait postinstall skipifsilent
+
