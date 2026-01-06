@@ -208,7 +208,7 @@ class MainWindow(QMainWindow):
         self.check_for_updates(auto=True)
 
     # --------------------------------------------------------
-    # UPDATE VIA INSTALADOR
+    # UPDATE VIA INSTALADOR (CORRETO)
     # --------------------------------------------------------
 
     def check_for_updates(self, auto: bool = False):
@@ -244,6 +244,7 @@ class MainWindow(QMainWindow):
             shell=True,
         )
 
+        # fecha o app para liberar arquivos
         sys.exit(0)
 
     # --------------------------------------------------------
