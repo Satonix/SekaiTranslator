@@ -5,7 +5,7 @@ import sys
 import subprocess
 
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QSettings
-from PySide6.QtGui import QAction, QFont, QColor, QShortcut
+from PySide6.QtGui import QFont, QColor, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow,
     QSplitter,
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from sekai_translator import __app_name__, __version__
 from sekai_translator.update_service import UpdateService
 
-from sekai_translator.core import Project
+from sekai_translator.core import Project, TranslationStatus
 from sekai_translator.project_io import load_project, save_project
 from sekai_translator.translation_table import (
     TranslationTableModel,
@@ -32,6 +32,7 @@ from sekai_translator.editor_panel import EditorPanel
 from sekai_translator.importer import import_file
 from sekai_translator.exporter import export_translated_file
 from sekai_translator.qa_service import QAService
+from sekai_translator.project_status import build_project_status, export_project_status
 
 from sekai_translator.create_project_dialog import CreateProjectDialog
 from sekai_translator.open_project_dialog import OpenProjectDialog
@@ -72,6 +73,13 @@ class FileFilterProxy(QSortFilterProxyModel):
     def data(self, index, role=Qt.DisplayRole):
         src = self.mapToSource(index)
         path = self.sourceModel().filePath(src)
+
+        if role == Qt.DisplayRole:
+            name = os.path.basename(path)
+            if self.project and path in self.project.files:
+                progress = self.project.file_progress(path)
+                return f"{name} [{progress}%]"
+            return name
 
         if role == Qt.FontRole:
             font = QFont()
@@ -144,7 +152,9 @@ class FileTab(QWidget):
             self.table.selectRow(0)
 
     def _on_selection_changed(self, *_):
-        rows = sorted(i.row() for i in self.table.selectionModel().selectedRows())
+        rows = sorted(
+            i.row() for i in self.table.selectionModel().selectedRows()
+        )
         if rows:
             self.editor.set_entries([self.model.entries[r] for r in rows])
 
@@ -156,6 +166,7 @@ class FileTab(QWidget):
 
         self.dirty = True
         self.parent.update_tab_title(self)
+        self.parent._update_status_bar()
 
         self.model.refresh()
 
@@ -203,6 +214,7 @@ class MainWindow(QMainWindow):
         self.open_tabs: Dict[str, FileTab] = {}
 
         self._build_ui()
+        self._build_status_bar()
         self._build_menu()
         self._install_global_shortcuts()
         self._try_restore_last_project()
@@ -210,12 +222,48 @@ class MainWindow(QMainWindow):
         self.check_for_updates(auto=True)
 
     # --------------------------------------------------------
+    # Status bar
+    # --------------------------------------------------------
+
+    def _build_status_bar(self):
+        bar = self.statusBar()
+
+        self.status_file = QLabel("Arquivo: -")
+        self.status_file_progress = QLabel("Arquivo: 0%")
+        self.status_project_progress = QLabel("Projeto: 0%")
+
+        bar.addWidget(self.status_file)
+        bar.addWidget(self.status_file_progress)
+        bar.addPermanentWidget(self.status_project_progress)
+
+    def _update_status_bar(self):
+        if not self.project:
+            self.status_file.setText("Arquivo: -")
+            self.status_file_progress.setText("Arquivo: 0%")
+            self.status_project_progress.setText("Projeto: 0%")
+            return
+
+        tab = self.tabs.currentWidget()
+
+        if tab:
+            name = Path(tab.file_path).name
+            progress = self.project.file_progress(tab.file_path)
+            self.status_file.setText(f"Arquivo: {name}")
+            self.status_file_progress.setText(f"Arquivo: {progress}%")
+        else:
+            self.status_file.setText("Arquivo: -")
+            self.status_file_progress.setText("Arquivo: 0%")
+
+        stats = build_project_status(self.project)
+        self.status_project_progress.setText(
+            f"Projeto: {stats['stats']['progress']}%"
+        )
+
+    # --------------------------------------------------------
+    # Global shortcuts
+    # --------------------------------------------------------
 
     def _install_global_shortcuts(self):
-        """
-        Garante que Ctrl+Z / Ctrl+Y funcionem
-        independentemente do foco.
-        """
         self.undo_shortcut = QShortcut("Ctrl+Z", self)
         self.undo_shortcut.setContext(Qt.ApplicationShortcut)
         self.undo_shortcut.activated.connect(self.undo)
@@ -224,6 +272,8 @@ class MainWindow(QMainWindow):
         self.redo_shortcut.setContext(Qt.ApplicationShortcut)
         self.redo_shortcut.activated.connect(self.redo)
 
+    # --------------------------------------------------------
+    # UI
     # --------------------------------------------------------
 
     def _build_ui(self):
@@ -248,7 +298,6 @@ class MainWindow(QMainWindow):
         self.tree.setModel(self.fs_proxy)
         self.tree.setHeaderHidden(True)
         self.tree.setEnabled(False)
-        self.tree.setAnimated(False)
         self.tree.setUniformRowHeights(True)
         self.tree.setMinimumWidth(220)
         self.tree.setMaximumWidth(400)
@@ -268,44 +317,39 @@ class MainWindow(QMainWindow):
         self.tabs.tabCloseRequested.connect(self._close_tab)
 
     # --------------------------------------------------------
+    # MENUS
+    # --------------------------------------------------------
 
     def _build_menu(self):
-        menu = self.menuBar().addMenu("Arquivo")
+        menubar = self.menuBar()
 
-        menu.addAction("Abrir Projeto...", self.open_project)
-        menu.addAction("Criar Projeto...", self.create_project)
-        menu.addAction("Salvar Projeto", self.save_project)
-        menu.addAction("Exportar Arquivo Atual", self.export_current_file)
+        file_menu = menubar.addMenu("Arquivo")
+        file_menu.addAction("Abrir Projeto...", self.open_project)
+        file_menu.addAction("Criar Projeto...", self.create_project)
+        file_menu.addAction("Salvar Projeto", self.save_project)
+        file_menu.addSeparator()
+        file_menu.addAction("Exportar Arquivo Atual", self.export_current_file)
+        file_menu.addAction("Exportar Status do Projeto", self._export_project_status)
+        file_menu.addSeparator()
+        file_menu.addAction("Sair", self.close)
 
-        menu.addSeparator()
-
-        menu.addAction("Desfazer", self.undo)
-        menu.addAction("Refazer", self.redo)
-
-        menu.addSeparator()
-        menu.addAction("Verificar atualizações", self.check_for_updates)
+        help_menu = menubar.addMenu("Ajuda")
+        help_menu.addAction("Verificar atualizações", self.check_for_updates)
+        help_menu.addAction("Sobre", self._show_about)
 
     # --------------------------------------------------------
     # Undo / Redo
     # --------------------------------------------------------
 
     def undo(self):
-        if not self.project:
-            return
-        if not self.project.undo_stack.can_undo():
-            return
-
-        self.project.undo_stack.undo(self.project)
-        self._refresh_after_undo_redo()
+        if self.project and self.project.undo_stack.can_undo():
+            self.project.undo_stack.undo(self.project)
+            self._refresh_after_undo_redo()
 
     def redo(self):
-        if not self.project:
-            return
-        if not self.project.undo_stack.can_redo():
-            return
-
-        self.project.undo_stack.redo(self.project)
-        self._refresh_after_undo_redo()
+        if self.project and self.project.undo_stack.can_redo():
+            self.project.undo_stack.redo(self.project)
+            self._refresh_after_undo_redo()
 
     def _refresh_after_undo_redo(self):
         for tab in self.open_tabs.values():
@@ -315,6 +359,10 @@ class MainWindow(QMainWindow):
             self.project.rebuild_all_file_status()
             self.fs_proxy.invalidateFilter()
 
+        self._update_status_bar()
+
+    # --------------------------------------------------------
+    # Project lifecycle
     # --------------------------------------------------------
 
     def _try_restore_last_project(self):
@@ -324,8 +372,6 @@ class MainWindow(QMainWindow):
                 self._load_project(last)
             except Exception:
                 pass
-
-    # --------------------------------------------------------
 
     def open_project(self):
         dlg = OpenProjectDialog(self)
@@ -356,7 +402,10 @@ class MainWindow(QMainWindow):
 
         self.settings.setValue("last_project_path", path)
         self.main_splitter.setSizes([300, 1200])
+        self._update_status_bar()
 
+    # --------------------------------------------------------
+    # File handling
     # --------------------------------------------------------
 
     def _on_tree_double_click(self, proxy_index):
@@ -382,8 +431,7 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentWidget(tab)
 
         self.fs_proxy.set_active_path(path)
-
-    # --------------------------------------------------------
+        self._update_status_bar()
 
     def update_tab_title(self, tab: FileTab):
         idx = self.tabs.indexOf(tab)
@@ -395,7 +443,10 @@ class MainWindow(QMainWindow):
         tab: FileTab = self.tabs.widget(index)
         self.open_tabs.pop(tab.file_path, None)
         self.tabs.removeTab(index)
+        self._update_status_bar()
 
+    # --------------------------------------------------------
+    # Actions
     # --------------------------------------------------------
 
     def save_project(self):
@@ -403,12 +454,12 @@ class MainWindow(QMainWindow):
             return
 
         save_project(self.project)
-
-        from sekai_translator.project_status import export_project_status
         export_project_status(self.project)
 
         for tab in self.open_tabs.values():
             tab.mark_clean()
+
+        self._update_status_bar()
 
     def export_current_file(self):
         tab = self.tabs.currentWidget()
@@ -443,7 +494,23 @@ class MainWindow(QMainWindow):
         )
 
     # --------------------------------------------------------
-    # UPDATE VIA INSTALADOR
+    # Helpers
+    # --------------------------------------------------------
+
+    def _export_project_status(self):
+        if self.project:
+            export_project_status(self.project)
+
+    def _show_about(self):
+        QMessageBox.information(
+            self,
+            "Sobre",
+            f"{__app_name__}\nVersão {__version__}\n\n"
+            "Ferramenta de tradução de Visual Novels.",
+        )
+
+    # --------------------------------------------------------
+    # Update
     # --------------------------------------------------------
 
     def check_for_updates(self, auto: bool = False):
@@ -473,10 +540,36 @@ class MainWindow(QMainWindow):
 
     def _run_updater(self, installer_url: str):
         updater = Path(sys.executable).with_name("updater.exe")
+        subprocess.Popen([str(updater), installer_url], shell=True)
+        sys.exit(0)
 
-        subprocess.Popen(
-            [str(updater), installer_url],
-            shell=True,
+    # --------------------------------------------------------
+    # Close event
+    # --------------------------------------------------------
+
+    def closeEvent(self, event):
+        if not self.project:
+            event.accept()
+            return
+
+        has_dirty = any(tab.dirty for tab in self.open_tabs.values())
+        if not has_dirty:
+            event.accept()
+            return
+
+        res = QMessageBox.question(
+            self,
+            "Projeto não salvo",
+            "Existem alterações não salvas no projeto.\n\n"
+            "Deseja salvar antes de sair?",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save,
         )
 
-        sys.exit(0)
+        if res == QMessageBox.Save:
+            self.save_project()
+            event.accept()
+        elif res == QMessageBox.Discard:
+            event.accept()
+        else:
+            event.ignore()

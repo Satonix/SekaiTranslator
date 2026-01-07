@@ -21,9 +21,6 @@ PROJECTS_DIR = APP_DIR / "projects"
 # ============================================================
 
 def slugify(name: str) -> str:
-    """
-    Converte o nome do projeto em um slug seguro para pasta.
-    """
     name = name.lower().strip()
     name = re.sub(r"[^\w\s-]", "", name)
     name = re.sub(r"[\s_-]+", "-", name)
@@ -31,9 +28,6 @@ def slugify(name: str) -> str:
 
 
 def unique_slug(base_slug: str) -> str:
-    """
-    Garante que o slug seja único dentro da pasta de projetos.
-    """
     slug = base_slug
     i = 1
     while (PROJECTS_DIR / slug).exists():
@@ -51,9 +45,6 @@ def _project_dir_from_slug(slug: str) -> Path:
 
 
 def _project_dir_legacy(project_id: str) -> Path:
-    """
-    Diretório legado baseado em ID (projetos antigos).
-    """
     return PROJECTS_DIR / project_id
 
 
@@ -68,9 +59,6 @@ def create_project(
     language: str = "en",
     engine: str = "artemis",
 ) -> Project:
-    """
-    Cria um novo projeto usando SLUG como nome da pasta.
-    """
     _ensure_dirs()
 
     project_id = uuid.uuid4().hex[:8]
@@ -86,7 +74,6 @@ def create_project(
         engine=engine,
     )
 
-    # slug não é obrigatório, mas é MUITO útil
     project.slug = slug  # type: ignore[attr-defined]
 
     save_project(project)
@@ -95,49 +82,50 @@ def create_project(
 
 def save_project(project: Project):
     """
-    Salva o projeto em disco.
-    Usa slug se existir, senão fallback para ID (legado).
+    Salvamento seguro:
+    - backup automático (.bak)
+    - escrita atômica (.tmp → .json)
     """
     _ensure_dirs()
 
     slug = getattr(project, "slug", None)
-
-    if slug:
-        project_dir = _project_dir_from_slug(slug)
-    else:
-        project_dir = _project_dir_legacy(project.id)
+    project_dir = (
+        _project_dir_from_slug(slug)
+        if slug
+        else _project_dir_legacy(project.id)
+    )
 
     project_dir.mkdir(exist_ok=True)
 
     path = project_dir / "project.json"
+    tmp_path = project_dir / "project.json.tmp"
+    bak_path = project_dir / "project.json.bak"
+
     project.project_path = str(path)
 
     data = project.to_dict()
-
-    # persiste slug no JSON se existir
     if slug:
         data["slug"] = slug
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(
-            data,
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+    # 1️⃣ escreve no arquivo temporário
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # 2️⃣ cria backup se o arquivo já existir
+    if path.exists():
+        shutil.copy2(path, bak_path)
+
+    # 3️⃣ substitui o arquivo real de forma atômica
+    os.replace(tmp_path, path)
 
 
 def load_project(project_path: str) -> Project:
-    """
-    Carrega projeto (novo ou legado).
-    """
     with open(project_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     project = Project.from_dict(data)
     project.project_path = project_path
 
-    # restaura slug se existir
     slug = data.get("slug")
     if slug:
         project.slug = slug  # type: ignore[attr-defined]
@@ -153,33 +141,23 @@ def load_project(project_path: str) -> Project:
 # ============================================================
 
 def rename_project(project: Project, new_name: str):
-    """
-    Renomeia apenas o NOME LÓGICO do projeto.
-    (não renomeia a pasta automaticamente)
-    """
     project.name = new_name
     save_project(project)
 
 
 def delete_project(project: Project):
-    """
-    Remove a pasta do projeto (slug ou legado).
-    """
     slug = getattr(project, "slug", None)
-
-    if slug:
-        project_dir = _project_dir_from_slug(slug)
-    else:
-        project_dir = _project_dir_legacy(project.id)
+    project_dir = (
+        _project_dir_from_slug(slug)
+        if slug
+        else _project_dir_legacy(project.id)
+    )
 
     if project_dir.exists():
         shutil.rmtree(project_dir)
 
 
 def list_projects() -> list[Project]:
-    """
-    Lista todos os projetos (slug e legado).
-    """
     _ensure_dirs()
 
     projects: list[Project] = []

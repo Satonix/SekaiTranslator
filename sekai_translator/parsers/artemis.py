@@ -34,7 +34,6 @@ class ArtemisParser(BaseParser):
         for ln, line in enumerate(lines, start=1):
             stripped = line.strip()
 
-            # ---------------- block_xxxx ----------------
             if not inside_block and stripped.startswith("block_") and stripped.endswith("{"):
                 inside_block = True
                 block_depth = 1
@@ -45,7 +44,6 @@ class ArtemisParser(BaseParser):
                 block_depth += stripped.count("{")
                 block_depth -= stripped.count("}")
 
-                # ---------------- text = { ----------------
                 if not inside_text and stripped.startswith("text ="):
                     inside_text = True
                     text_depth = 1
@@ -56,7 +54,6 @@ class ArtemisParser(BaseParser):
                     text_depth += stripped.count("{")
                     text_depth -= stripped.count("}")
 
-                    # --------- <language> = { (ordem livre) ---------
                     if (
                         not inside_lang
                         and stripped.replace(" ", "").startswith(f"{self.language}=")
@@ -76,36 +73,51 @@ class ArtemisParser(BaseParser):
                             entries.append(self._raw(line, ln))
                             continue
 
-                        # --------- TEXTO REAL ---------
-                        if stripped.startswith('"') or stripped.startswith('[['):
-                            raw = stripped.rstrip(",")
+                        raw = line.rstrip().rstrip(",")
 
-                            if raw.startswith('[['):
-                                text = raw[2:-2]
-                            else:
-                                text = raw.strip('"')
+                        wrapper = None
+                        text = None
 
-                            if text.strip():
-                                start = line.find(text)
-                                end = start + len(text)
+                        if '[["' in raw and '"]]' in raw:
+                            wrapper = "lua_long_string_quoted"
+                            start = raw.find('[["') + 3
+                            end = raw.rfind('"]]')
+                            text = raw[start:end]
 
-                                entries.append(
-                                    TranslationEntry(
-                                        entry_id=str(ln),
-                                        original=text,
-                                        translation="",
-                                        status=TranslationStatus.UNTRANSLATED,
-                                        context={
-                                            "raw_line": line,
-                                            "prefix": line[:start],
-                                            "suffix": line[end:],
-                                            "is_translatable": True,
-                                            "language": self.language,
-                                            "line_number": ln,
-                                        },
-                                    )
+                        elif '[[' in raw and ']]' in raw:
+                            wrapper = "lua_long_string"
+                            start = raw.find('[[') + 2
+                            end = raw.rfind(']]')
+                            text = raw[start:end]
+
+                        elif '"' in raw:
+                            wrapper = "lua_string"
+                            start = raw.find('"') + 1
+                            end = raw.rfind('"')
+                            text = raw[start:end]
+
+                        if text is not None:
+                            start_idx = line.find(text)
+                            end_idx = start_idx + len(text)
+
+                            entries.append(
+                                TranslationEntry(
+                                    entry_id=str(ln),
+                                    original=text,
+                                    translation="",
+                                    status=TranslationStatus.UNTRANSLATED,
+                                    context={
+                                        "raw_line": line,
+                                        "prefix": line[:start_idx],
+                                        "suffix": line[end_idx:],
+                                        "wrapper": wrapper,
+                                        "is_translatable": True,
+                                        "language": self.language,
+                                        "line_number": ln,
+                                    },
                                 )
-                                continue
+                            )
+                            continue
 
                         entries.append(self._raw(line, ln))
                         continue
@@ -133,20 +145,46 @@ class ArtemisParser(BaseParser):
     # --------------------------------------------------
 
     def rebuild(self, source_file, entries, encoding, suffix):
+        from pathlib import Path
+
         src = Path(source_file)
         out = src.with_name(f"{src.stem}{suffix}{src.suffix}")
 
         output = []
+
         for e in entries:
             ctx = e.context
+
             if not ctx.get("is_translatable"):
                 output.append(ctx["raw_line"])
-            else:
-                text = e.translation or e.original
-                output.append(f"{ctx['prefix']}{text}{ctx['suffix']}")
+                continue
+
+            text = e.translation or e.original
+            prefix = ctx["prefix"]
+            suffix = ctx["suffix"]
+
+            rebuilt = text
+
+            # ==================================================
+            # CASO EXATO: linha original era [["texto"]]
+            # ==================================================
+            if (
+                prefix.rstrip().endswith("[[")
+                and suffix.lstrip().startswith("]]")
+                and not prefix.rstrip().endswith('"')
+                and not suffix.lstrip().startswith('"')
+            ):
+                t = text.strip()
+                if not (t.startswith('"') and t.endswith('"')):
+                    rebuilt = f'"{t}"'
+                else:
+                    rebuilt = t
+
+            output.append(f"{prefix}{rebuilt}{suffix}")
 
         out.write_text("\n".join(output), encoding=encoding)
         return out
+
 
     # --------------------------------------------------
 

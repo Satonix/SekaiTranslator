@@ -1,4 +1,5 @@
 from typing import List
+import re
 
 from PySide6.QtCore import (
     Qt,
@@ -10,6 +11,34 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QTableView, QHeaderView
 
 from sekai_translator.core import TranslationEntry, TranslationStatus
+
+
+# ============================================================
+# Helpers (VISUAL ONLY)
+# ============================================================
+
+def clean_engine_syntax(text: str) -> str:
+    """
+    Remove APENAS delimitadores externos de engine para exibição.
+    NÃO altera o conteúdo real.
+
+    Exemplos:
+    "texto"              -> texto
+    [[texto]]            -> texto
+    [["texto"]]          -> "texto"
+    """
+    if not text:
+        return ""
+
+    t = text.strip()
+
+    if t.startswith("[[") and t.endswith("]]"):
+        return t[2:-2]
+
+    if t.startswith('"') and t.endswith('"'):
+        return t[1:-1]
+
+    return t
 
 
 # ============================================================
@@ -48,6 +77,7 @@ class TranslationTableModel(QAbstractTableModel):
         entry = self.entries[index.row()]
         col = index.column()
 
+        # ---------------- VISUAL ----------------
         if role == Qt.DisplayRole:
             if col == 0:
                 if entry.qa_issues:
@@ -57,17 +87,19 @@ class TranslationTableModel(QAbstractTableModel):
                 return index.row() + 1
 
             if col == 1:
-                return entry.original
+                return clean_engine_syntax(entry.original)
 
             if col == 2:
-                return entry.translation
+                return clean_engine_syntax(entry.translation)
 
+        # ---------------- Tooltip QA ----------------
         if role == Qt.ToolTipRole and entry.qa_issues:
             return "\n".join(
                 f"{'❌' if i.level == 'error' else '⚠️'} {i.message}"
                 for i in entry.qa_issues
             )
 
+        # ---------------- Background ----------------
         if role == Qt.BackgroundRole:
             return {
                 TranslationStatus.UNTRANSLATED: QColor("#2a2a2a"),
@@ -76,11 +108,13 @@ class TranslationTableModel(QAbstractTableModel):
                 TranslationStatus.REVIEWED: QColor("#1f2f3a"),
             }.get(entry.status)
 
+        # ---------------- Font ----------------
         if role == Qt.FontRole and entry.status == TranslationStatus.UNTRANSLATED:
             font = QFont()
             font.setItalic(True)
             return font
 
+        # ---------------- Alignment ----------------
         if role == Qt.TextAlignmentRole and col == 0:
             return Qt.AlignLeft | Qt.AlignVCenter
 
@@ -101,7 +135,7 @@ class TranslationTableModel(QAbstractTableModel):
                 self.index(index.row(), self.columnCount() - 1),
             )
 
-            # 🔥 ENTER = próxima linha
+            # ENTER = próxima linha
             self.advance_requested.emit(index.row())
             return True
 
@@ -117,7 +151,7 @@ class TranslationTableModel(QAbstractTableModel):
 
         return flags
 
-    # ---------------- Refresh (RESTAURADO) ----------------
+    # ---------------- Refresh ----------------
 
     def refresh(self):
         self.beginResetModel()

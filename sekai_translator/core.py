@@ -15,7 +15,7 @@ class TranslationStatus(str, Enum):
     UNTRANSLATED = "untranslated"
     IN_PROGRESS = "in_progress"
     TRANSLATED = "translated"
-    REVIEWED = "reviewed"
+    REVIEWED = "reviewed"  # mantido por compatibilidade, não usado no progresso
 
 
 # ============================================================
@@ -102,6 +102,34 @@ class Project:
         self.file_status_cache.clear()
         for path in self.files:
             self.update_file_status(path)
+
+    # --------------------------------------------------
+    # Progresso por arquivo (NOVO)
+    # --------------------------------------------------
+
+    def file_progress(self, path: str) -> int:
+        """
+        Retorna o progresso do arquivo em porcentagem (0–100),
+        considerando APENAS linhas traduzíveis e status TRANSLATED.
+        """
+        entries = self.files.get(path)
+        if not entries:
+            return 0
+
+        translatable = [
+            e for e in entries
+            if e.context.get("is_translatable")
+        ]
+
+        if not translatable:
+            return 0
+
+        translated = len([
+            e for e in translatable
+            if e.status == TranslationStatus.TRANSLATED
+        ])
+
+        return int((translated / len(translatable)) * 100)
 
     # --------------------------------------------------
     # Persistência
