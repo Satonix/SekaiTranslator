@@ -11,7 +11,7 @@ DefaultGroupName=SekaiTranslator
 PrivilegesRequired=lowest
 UsePreviousAppDir=yes
 CloseApplications=yes
-RestartApplications=no
+RestartApplications=yes
 
 OutputDir=installer
 OutputBaseFilename=SekaiTranslator_Setup
@@ -30,6 +30,7 @@ Name: "{userdesktop}\SekaiTranslator"; Filename: "{app}\SekaiTranslator.exe"
 
 [Run]
 Filename: "{app}\SekaiTranslator.exe"; Description: "Iniciar SekaiTranslator"; Flags: nowait postinstall skipifsilent
+
 
 
 
