@@ -1,37 +1,54 @@
-import requests
-from packaging.version import Version
+import sys
+
+from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtCore import Qt
+
+from sekai_translator.main_window import MainWindow
 
 
-VERSION_URL = (
-    "https://raw.githubusercontent.com/Satonix/SekaiTranslator/main/version.json"
-)
+def apply_dark_theme(app: QApplication):
+    """
+    Aplica tema escuro global (padrão).
+    """
+    app.setStyle("Fusion")
+
+    palette = QPalette()
+
+    # Base
+    palette.setColor(QPalette.Window, QColor(30, 30, 30))
+    palette.setColor(QPalette.WindowText, Qt.white)
+    palette.setColor(QPalette.Base, QColor(24, 24, 24))
+    palette.setColor(QPalette.AlternateBase, QColor(36, 36, 36))
+    palette.setColor(QPalette.ToolTipBase, Qt.white)
+    palette.setColor(QPalette.ToolTipText, Qt.white)
+    palette.setColor(QPalette.Text, Qt.white)
+    palette.setColor(QPalette.Button, QColor(45, 45, 45))
+    palette.setColor(QPalette.ButtonText, Qt.white)
+    palette.setColor(QPalette.BrightText, Qt.red)
+
+    # Destaques
+    palette.setColor(QPalette.Highlight, QColor(60, 120, 200))
+    palette.setColor(QPalette.HighlightedText, Qt.white)
+
+    # Estados desativados
+    palette.setColor(QPalette.Disabled, QPalette.Text, QColor(130, 130, 130))
+    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(130, 130, 130))
+
+    app.setPalette(palette)
 
 
-class UpdateInfo:
-    def __init__(self, version: str, url: str):
-        self.version = version
-        self.url = url
+def main():
+    app = QApplication(sys.argv)
+
+    # 🌙 Tema escuro como padrão
+    apply_dark_theme(app)
+
+    window = MainWindow()
+    window.show()
+
+    sys.exit(app.exec())
 
 
-class UpdateService:
-
-    @staticmethod
-    def check(current_version: str) -> UpdateInfo | None:
-        try:
-            r = requests.get(VERSION_URL, timeout=5)
-            r.raise_for_status()
-            data = r.json()
-
-            latest = data.get("version")
-            url = data.get("url")
-
-            if not latest or not url:
-                return None
-
-            if Version(latest) > Version(current_version):
-                return UpdateInfo(latest, url)
-
-        except Exception:
-            return None
-
-        return None
+if __name__ == "__main__":
+    main()
