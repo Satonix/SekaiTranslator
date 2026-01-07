@@ -1,9 +1,9 @@
 [Setup]
 AppId={{SekaiTranslator}}
 AppName=SekaiTranslator
-AppVersion=0.4.0-alpha
-AppVerName=SekaiTranslator 0.4.0-alpha
-VersionInfoVersion=0.4.0.0
+AppVersion=0.5.0-alpha
+AppVerName=SekaiTranslator 0.5.0-alpha
+VersionInfoVersion=0.5.0.0
 
 DefaultDirName={localappdata}\Programs\SekaiTranslator
 DefaultGroupName=SekaiTranslator
@@ -30,6 +30,7 @@ Name: "{userdesktop}\SekaiTranslator"; Filename: "{app}\SekaiTranslator.exe"
 
 [Run]
 Filename: "{app}\SekaiTranslator.exe"; Description: "Iniciar SekaiTranslator"; Flags: nowait postinstall skipifsilent
+
 
 
 
