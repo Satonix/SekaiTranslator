@@ -49,6 +49,7 @@ class CreateProjectDialog(QDialog):
         self.engine_combo = QComboBox()
         self.engine_combo.addItems([
             "artemis",
+            "siglus",
             # "kirikiri",
             # "renpy",
         ])

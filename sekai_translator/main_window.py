@@ -43,7 +43,7 @@ from sekai_translator.open_project_dialog import OpenProjectDialog
 
 class FileFilterProxy(QSortFilterProxyModel):
 
-    ALLOWED_EXTENSIONS = {".ast"}
+    ALLOWED_EXTENSIONS = {".ast", ".txt"}
 
     def __init__(self):
         super().__init__()
