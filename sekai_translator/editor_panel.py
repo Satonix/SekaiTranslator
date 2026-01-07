@@ -46,8 +46,13 @@ class EditorPanel(QWidget):
 
         self.translation_edit = QPlainTextEdit()
         self.translation_edit.setWordWrapMode(QTextOption.WordWrap)
+
+        # 🔥 Desativa undo interno do Qt
+        self.translation_edit.setUndoRedoEnabled(False)
+
         layout.addWidget(self.translation_edit)
 
+        # Intercepta teclas
         self.translation_edit.installEventFilter(self)
 
     # -------------------------------------------------
@@ -63,25 +68,53 @@ class EditorPanel(QWidget):
 
         if len(entries) == 1:
             self.translation_edit.setPlainText(entries[0].translation or "")
+            self.translation_edit.selectAll()
         else:
             self.translation_edit.clear()
 
+        self.translation_edit.setFocus()
+
     # -------------------------------------------------
-    # ENTER / SHIFT+ENTER
+    # EVENT FILTER (CTRL+Z / CTRL+Y / ENTER)
     # -------------------------------------------------
 
     def eventFilter(self, obj, event):
         if obj is self.translation_edit and event.type() == QEvent.KeyPress:
-            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                if event.modifiers() & Qt.ShiftModifier:
+            key = event.key()
+            mods = event.modifiers()
+
+            # 🔥 UNDO GLOBAL (FORÇADO)
+            if key == Qt.Key_Z and mods & Qt.ControlModifier:
+                self._call_main_window("undo")
+                return True
+
+            # 🔥 REDO GLOBAL (FORÇADO)
+            if key == Qt.Key_Y and mods & Qt.ControlModifier:
+                self._call_main_window("redo")
+                return True
+
+            # ENTER / SHIFT+ENTER
+            if key in (Qt.Key_Return, Qt.Key_Enter):
+                if mods & Qt.ShiftModifier:
                     return False
                 self._commit_translation()
                 return True
-            elif event.key() == Qt.Key_Up and event.modifiers() & Qt.ControlModifier:
+
+            # CTRL+↑
+            if key == Qt.Key_Up and mods & Qt.ControlModifier:
                 self.request_prev.emit()
                 return True
 
         return super().eventFilter(obj, event)
+
+    def _call_main_window(self, method: str):
+        """
+        Chama undo/redo diretamente no MainWindow,
+        ignorando completamente o sistema de atalhos do Qt.
+        """
+        win = self.window()
+        if win and hasattr(win, method):
+            getattr(win, method)()
 
     # -------------------------------------------------
     # Commit DEFINITIVO (single + batch + undo correto)
@@ -138,8 +171,8 @@ class EditorPanel(QWidget):
 
         for entry, new_text in zip(entries, texts_per_entry):
             old_text = entry.translation
-
             old_status = entry.status
+
             new_status = (
                 TranslationStatus.TRANSLATED
                 if new_text.strip()
@@ -170,7 +203,6 @@ class EditorPanel(QWidget):
         if not undo_actions:
             return
 
-        # 🔒 batch = 1 undo
         self.project.undo_stack.push(
             CompositeUndoAction(undo_actions)
         )

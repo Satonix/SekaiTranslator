@@ -1,11 +1,11 @@
 from pathlib import Path
 from typing import Dict
-
+import os
 import sys
 import subprocess
 
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QSettings
-from PySide6.QtGui import QAction, QFont, QColor
+from PySide6.QtGui import QAction, QFont, QColor, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow,
     QSplitter,
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from sekai_translator import __app_name__, __version__
 from sekai_translator.update_service import UpdateService
 
-from sekai_translator.core import Project, TranslationStatus
+from sekai_translator.core import Project
 from sekai_translator.project_io import load_project, save_project
 from sekai_translator.translation_table import (
     TranslationTableModel,
@@ -43,48 +43,47 @@ from sekai_translator.open_project_dialog import OpenProjectDialog
 
 class FileFilterProxy(QSortFilterProxyModel):
 
-    ALLOWED_EXTENSIONS = {".ast", ".txt"}
+    ALLOWED_EXTENSIONS = {".ast"}
 
     def __init__(self):
         super().__init__()
         self.project: Project | None = None
-        self.active_path: Path | None = None
+        self.active_path: str | None = None
 
     def set_project(self, project: Project | None):
         self.project = project
-        self.invalidate()
+        self.invalidateFilter()
 
     def set_active_path(self, path: str | None):
-        self.active_path = Path(path).resolve() if path else None
-        self.invalidate()
+        self.active_path = os.path.normpath(path) if path else None
+        self.invalidateFilter()
 
     def filterAcceptsRow(self, row, parent):
         index = self.sourceModel().index(row, 0, parent)
         if not index.isValid():
             return False
 
-        path = Path(self.sourceModel().filePath(index))
-        if path.is_dir():
+        path = self.sourceModel().filePath(index)
+        if os.path.isdir(path):
             return True
 
-        return path.suffix.lower() in self.ALLOWED_EXTENSIONS
+        return Path(path).suffix.lower() in self.ALLOWED_EXTENSIONS
 
     def data(self, index, role=Qt.DisplayRole):
         src = self.mapToSource(index)
-        path = Path(self.sourceModel().filePath(src)).resolve()
+        path = self.sourceModel().filePath(src)
 
         if role == Qt.FontRole:
             font = QFont()
-            if self.active_path and path == self.active_path:
+            if self.active_path and os.path.normpath(path) == self.active_path:
                 font.setBold(True)
             return font
 
         if role == Qt.ForegroundRole and self.project:
-            entries = self.project.files.get(str(path))
-            if entries and any(e.status == TranslationStatus.TRANSLATED for e in entries):
+            if self.project.file_status_cache.get(path):
                 return QColor("#a7f3d0")
 
-            if self.active_path and path == self.active_path:
+            if self.active_path and os.path.normpath(path) == self.active_path:
                 return QColor("#8ab4f8")
 
         return super().data(index, role)
@@ -107,6 +106,7 @@ class FileTab(QWidget):
         if file_path not in project.files:
             project.files[file_path] = import_file(file_path, project)
             project.index_entries()
+            project.update_file_status(file_path)
 
         self.all_entries = project.files[file_path]
 
@@ -152,10 +152,12 @@ class FileTab(QWidget):
         for entry in self.editor._entries:
             entry.qa_issues = QAService.run(entry)
 
+        self.project.update_file_status(self.file_path)
+
         self.dirty = True
         self.parent.update_tab_title(self)
+
         self.model.refresh()
-        self.parent.fs_proxy.invalidate()
 
     def _go_next(self):
         if not self.editor._entries:
@@ -165,6 +167,7 @@ class FileTab(QWidget):
             row = self.model.entries.index(entry)
         except ValueError:
             return
+
         if row + 1 < self.model.rowCount():
             self.table.selectRow(row + 1)
 
@@ -201,9 +204,25 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_menu()
+        self._install_global_shortcuts()
         self._try_restore_last_project()
 
         self.check_for_updates(auto=True)
+
+    # --------------------------------------------------------
+
+    def _install_global_shortcuts(self):
+        """
+        Garante que Ctrl+Z / Ctrl+Y funcionem
+        independentemente do foco.
+        """
+        self.undo_shortcut = QShortcut("Ctrl+Z", self)
+        self.undo_shortcut.setContext(Qt.ApplicationShortcut)
+        self.undo_shortcut.activated.connect(self.undo)
+
+        self.redo_shortcut = QShortcut("Ctrl+Y", self)
+        self.redo_shortcut.setContext(Qt.ApplicationShortcut)
+        self.redo_shortcut.activated.connect(self.redo)
 
     # --------------------------------------------------------
 
@@ -211,7 +230,6 @@ class MainWindow(QMainWindow):
         self.main_splitter = QSplitter(Qt.Horizontal)
         self.setCentralWidget(self.main_splitter)
 
-        # ---------------- Tree ----------------
         tree_container = QWidget()
         tree_layout = QVBoxLayout(tree_container)
         tree_layout.setContentsMargins(6, 6, 6, 6)
@@ -220,6 +238,9 @@ class MainWindow(QMainWindow):
         tree_layout.addWidget(self.tree_header)
 
         self.fs_model = QFileSystemModel()
+        self.fs_model.setNameFilters(["*.ast"])
+        self.fs_model.setNameFilterDisables(False)
+
         self.fs_proxy = FileFilterProxy()
         self.fs_proxy.setSourceModel(self.fs_model)
 
@@ -227,6 +248,8 @@ class MainWindow(QMainWindow):
         self.tree.setModel(self.fs_proxy)
         self.tree.setHeaderHidden(True)
         self.tree.setEnabled(False)
+        self.tree.setAnimated(False)
+        self.tree.setUniformRowHeights(True)
         self.tree.setMinimumWidth(220)
         self.tree.setMaximumWidth(400)
 
@@ -236,11 +259,9 @@ class MainWindow(QMainWindow):
         tree_layout.addWidget(self.tree)
         self.main_splitter.addWidget(tree_container)
 
-        # ---------------- Tabs ----------------
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
         self.main_splitter.addWidget(self.tabs)
-
         self.main_splitter.setSizes([300, 1200])
 
         self.tree.doubleClicked.connect(self._on_tree_double_click)
@@ -257,7 +278,42 @@ class MainWindow(QMainWindow):
         menu.addAction("Exportar Arquivo Atual", self.export_current_file)
 
         menu.addSeparator()
+
+        menu.addAction("Desfazer", self.undo)
+        menu.addAction("Refazer", self.redo)
+
+        menu.addSeparator()
         menu.addAction("Verificar atualizações", self.check_for_updates)
+
+    # --------------------------------------------------------
+    # Undo / Redo
+    # --------------------------------------------------------
+
+    def undo(self):
+        if not self.project:
+            return
+        if not self.project.undo_stack.can_undo():
+            return
+
+        self.project.undo_stack.undo(self.project)
+        self._refresh_after_undo_redo()
+
+    def redo(self):
+        if not self.project:
+            return
+        if not self.project.undo_stack.can_redo():
+            return
+
+        self.project.undo_stack.redo(self.project)
+        self._refresh_after_undo_redo()
+
+    def _refresh_after_undo_redo(self):
+        for tab in self.open_tabs.values():
+            tab.model.refresh()
+
+        if self.project:
+            self.project.rebuild_all_file_status()
+            self.fs_proxy.invalidateFilter()
 
     # --------------------------------------------------------
 
@@ -283,7 +339,6 @@ class MainWindow(QMainWindow):
 
     def _load_project(self, path: str):
         self.project = load_project(path)
-        self.project.index_entries()
 
         root = Path(self.project.root_path)
         src_index = self.fs_model.setRootPath(str(root))
@@ -300,8 +355,6 @@ class MainWindow(QMainWindow):
         self.open_tabs.clear()
 
         self.settings.setValue("last_project_path", path)
-
-        # 🔥 FIX REAL: reaplica após QFileSystemModel recalcular layout
         self.main_splitter.setSizes([300, 1200])
 
     # --------------------------------------------------------
@@ -309,8 +362,10 @@ class MainWindow(QMainWindow):
     def _on_tree_double_click(self, proxy_index):
         if not self.project:
             return
+
         src = self.fs_proxy.mapToSource(proxy_index)
         path = self.fs_model.filePath(src)
+
         if not Path(path).is_dir():
             self._open_file(path)
 
@@ -346,7 +401,12 @@ class MainWindow(QMainWindow):
     def save_project(self):
         if not self.project:
             return
+
         save_project(self.project)
+
+        from sekai_translator.project_status import export_project_status
+        export_project_status(self.project)
+
         for tab in self.open_tabs.values():
             tab.mark_clean()
 
@@ -419,5 +479,4 @@ class MainWindow(QMainWindow):
             shell=True,
         )
 
-        # fecha o app para liberar arquivos
         sys.exit(0)
