@@ -1,5 +1,6 @@
 __app_name__ = "SekaiTranslator"
-__version__ = "0.3.21-alpha"
+__version__ = "0.4.0-alpha"
+
 
 
 
