@@ -2,8 +2,8 @@
 AppId={{SekaiTranslator}}
 AppName=SekaiTranslator
 AppVersion=0.5.0-alpha
-AppVerName=SekaiTranslator 0.5.0-alpha
-VersionInfoVersion=0.5.0.0
+AppVerName=SekaiTranslator 0.6.1-alpha
+VersionInfoVersion=0.6.1.0
 
 DefaultDirName={localappdata}\Programs\SekaiTranslator
 DefaultGroupName=SekaiTranslator
