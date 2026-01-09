@@ -44,7 +44,7 @@ from sekai_translator.open_project_dialog import OpenProjectDialog
 
 class FileFilterProxy(QSortFilterProxyModel):
 
-    ALLOWED_EXTENSIONS = {".ast"}
+    ALLOWED_EXTENSIONS = {".ast", ".ks", ".txt"}
 
     def __init__(self):
         super().__init__()
@@ -130,8 +130,10 @@ class FileTab(QWidget):
 
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+
 
         self.editor = EditorPanel(self.project)
 
@@ -156,7 +158,11 @@ class FileTab(QWidget):
             i.row() for i in self.table.selectionModel().selectedRows()
         )
         if rows:
-            self.editor.set_entries([self.model.entries[r] for r in rows])
+            self.editor.set_entries(
+                [self.model.entries[r] for r in rows],
+                rows
+        )
+
 
     def _on_entry_changed(self):
         for entry in self.editor._entries:
@@ -288,7 +294,7 @@ class MainWindow(QMainWindow):
         tree_layout.addWidget(self.tree_header)
 
         self.fs_model = QFileSystemModel()
-        self.fs_model.setNameFilters(["*.ast"])
+        self.fs_model.setNameFilters(["*.ast", "*.ks", "*.txt"])
         self.fs_model.setNameFilterDisables(False)
 
         self.fs_proxy = FileFilterProxy()

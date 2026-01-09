@@ -50,7 +50,7 @@ class CreateProjectDialog(QDialog):
         self.engine_combo.addItems([
             "artemis",
             "siglus",
-            # "kirikiri",
+            "kirikiri",
             # "renpy",
         ])
         layout.addWidget(self.engine_combo)

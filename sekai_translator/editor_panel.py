@@ -1,21 +1,21 @@
 from PySide6.QtCore import Qt, Signal, QEvent
-from PySide6.QtGui import QTextOption, QTextCursor
+from PySide6.QtGui import QTextOption, QFont
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QLabel,
     QPlainTextEdit,
     QMessageBox,
+    QHBoxLayout,
+    QStyle,
 )
-
-import re
 
 from sekai_translator.status_service import StatusService
 from sekai_translator.undo_stack import UndoAction, CompositeUndoAction
 from sekai_translator.core import TranslationStatus
 
 
-NUMBER_PREFIX_RE = re.compile(r"^\[\d+\]\s*")
+MAX_NAME_LEN = 14
 
 
 class EditorPanel(QWidget):
@@ -29,264 +29,198 @@ class EditorPanel(QWidget):
 
         self.project = project
         self._entries: list = []
+        self._rows: list[int] = []
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
+        mono = QFont("Consolas")
+        mono.setStyleHint(QFont.Monospace)
 
-        # -----------------------------
-        # Original
-        # -----------------------------
-        layout.addWidget(QLabel("Original"))
+        root = QVBoxLayout(self)
+        root.setContentsMargins(6, 4, 6, 4)
+        root.setSpacing(4)
+
+        # ================= ORIGINAL =================
+        root.addWidget(QLabel("Original"))
+
+        original_row = QHBoxLayout()
+        original_row.setSpacing(0)
+
+        self.meta_original = self._create_meta(mono)
+        original_row.addWidget(self.meta_original)
 
         self.original_edit = QPlainTextEdit()
+        self.original_edit.setFont(mono)
         self.original_edit.setReadOnly(True)
-        self.original_edit.setMaximumHeight(160)
-        self.original_edit.setWordWrapMode(QTextOption.WordWrap)
-        layout.addWidget(self.original_edit)
+        self.original_edit.setWordWrapMode(QTextOption.NoWrap)
+        self.original_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.original_edit.document().setDocumentMargin(0)
+        self.original_edit.setStyleSheet("QPlainTextEdit { border: none; }")
 
-        # -----------------------------
-        # Tradução
-        # -----------------------------
-        layout.addWidget(QLabel("Tradução"))
+        original_row.addWidget(self.original_edit)
+        root.addLayout(original_row)
+
+        # ================= TRADUÇÃO =================
+        root.addWidget(QLabel("Tradução"))
+
+        translation_row = QHBoxLayout()
+        translation_row.setSpacing(0)
+
+        self.meta_translation = self._create_meta(mono)
+        translation_row.addWidget(self.meta_translation)
 
         self.translation_edit = QPlainTextEdit()
-        self.translation_edit.setWordWrapMode(QTextOption.WordWrap)
+        self.translation_edit.setFont(mono)
         self.translation_edit.setUndoRedoEnabled(False)
-        layout.addWidget(self.translation_edit)
+        self.translation_edit.setWordWrapMode(QTextOption.NoWrap)
+        self.translation_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.translation_edit.document().setDocumentMargin(0)
+        self.translation_edit.setStyleSheet("QPlainTextEdit { border: none; }")
+
+        translation_row.addWidget(self.translation_edit)
+        root.addLayout(translation_row)
+
+        # Scroll sync
+        self.original_edit.verticalScrollBar().valueChanged.connect(
+            self.meta_original.verticalScrollBar().setValue
+        )
+        self.translation_edit.verticalScrollBar().valueChanged.connect(
+            self.meta_translation.verticalScrollBar().setValue
+        )
 
         self.translation_edit.installEventFilter(self)
 
-    # -------------------------------------------------
-    # Helpers (APENAS VISUAL)
-    # -------------------------------------------------
+    # ================= META =================
 
-    def _clean_engine_syntax(self, text: str) -> str:
-        """
-        Remove APENAS delimitadores externos de engine.
-        USADO SOMENTE PARA EXIBIÇÃO.
-        """
-        if not text:
-            return ""
+    def _create_meta(self, font: QFont) -> QPlainTextEdit:
+        meta = QPlainTextEdit()
+        meta.setFont(font)
+        meta.setReadOnly(True)
+        meta.setFixedWidth(120)
+        meta.setFocusPolicy(Qt.NoFocus)
+        meta.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        meta.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        meta.setWordWrapMode(QTextOption.NoWrap)
+        meta.document().setDocumentMargin(0)
 
-        t = text.strip()
+        opt = meta.document().defaultTextOption()
+        opt.setAlignment(Qt.AlignRight)
+        meta.document().setDefaultTextOption(opt)
 
-        if t.startswith("[[") and t.endswith("]]"):
-            return t[2:-2]
+        scrollbar_width = self.style().pixelMetric(QStyle.PM_ScrollBarExtent)
 
-        if t.startswith('"') and t.endswith('"'):
-            return t[1:-1]
+        meta.setStyleSheet(f"""
+        QPlainTextEdit {{
+            border: none;
+            background: transparent;
+            padding: 2px {6 + scrollbar_width}px 2px 2px;
+            color: #9ca3af;
+        }}
+        """)
 
-        return t
+        return meta
 
-    # -------------------------------------------------
-    # API pública
-    # -------------------------------------------------
+    # ================= API =================
 
-    def set_entries(self, entries: list):
+    def set_entries(self, entries: list, rows: list[int]):
         self._entries = entries
+        self._rows = rows
+        is_batch = len(entries) > 1
 
-        # ORIGINAL
-        if len(entries) == 1:
-            self.original_edit.setPlainText(
-                self._clean_engine_syntax(entries[0].original)
-            )
-        else:
-            self.original_edit.setPlainText(
-                "\n\n".join(
-                    f"[{i}] {self._clean_engine_syntax(e.original)}"
-                    for i, e in enumerate(entries, start=1)
-                )
+        # -------- ORIGINAL --------
+        self.original_edit.setPlainText(
+            "\n".join(e.original or "" for e in entries)
+            if is_batch else entries[0].original or ""
+        )
+
+        # -------- META (EXATAMENTE IGUAL À TABELA) --------
+        def truncate(name: str) -> str:
+            if not name:
+                return ""
+            return name if len(name) <= MAX_NAME_LEN else name[: MAX_NAME_LEN - 1] + "…"
+
+        meta_lines = []
+        for row, entry in zip(rows, entries):
+            number = row + 1  # tabela é 1-based visualmente
+            speaker = truncate(entry.context.get("speaker"))
+            meta_lines.append(
+                f"{number}. {speaker}" if speaker else f"{number}."
             )
 
-        # TRADUÇÃO (visual limpa)
-        if len(entries) == 1:
-            self.translation_edit.setPlainText(
-                self._clean_engine_syntax(entries[0].translation or "")
-            )
+        meta_text = "\n".join(meta_lines)
+
+        self.meta_original.setPlainText(meta_text)
+        self.meta_translation.setPlainText(meta_text)
+
+        # -------- TRANSLATION --------
+        self.translation_edit.setPlainText(
+            "\n".join(e.translation or "" for e in entries)
+            if is_batch else entries[0].translation or ""
+        )
+
+        if not is_batch:
             self.translation_edit.selectAll()
-        else:
-            self.translation_edit.setPlainText(
-                "\n\n".join(
-                    f"[{i}] {self._clean_engine_syntax(e.translation or '')}"
-                    for i, e in enumerate(entries, start=1)
-                )
-            )
 
-        self._ensure_cursor_after_prefix()
         self.translation_edit.setFocus()
 
-    # -------------------------------------------------
-    # EVENT FILTER
-    # -------------------------------------------------
+    # ================= EVENT FILTER =================
 
     def eventFilter(self, obj, event):
-        if obj is self.translation_edit:
+        if obj is self.translation_edit and event.type() == QEvent.KeyPress:
+            key = event.key()
+            mods = event.modifiers()
+            is_batch = len(self._entries) > 1
+            cursor = self.translation_edit.textCursor()
 
-            if event.type() in (QEvent.MouseButtonRelease, QEvent.FocusIn):
-                self._ensure_cursor_after_prefix()
-                return False
+            if is_batch and key in (Qt.Key_Return, Qt.Key_Enter) and mods & Qt.ShiftModifier:
+                self._jump(cursor, +1)
+                return True
 
-            if event.type() == QEvent.KeyPress:
-                key = event.key()
-                mods = event.modifiers()
+            if is_batch and key == Qt.Key_Down and cursor.atBlockEnd():
+                self._jump(cursor, +1)
+                return True
 
-                cursor = self.translation_edit.textCursor()
-                block = cursor.block()
-                text = block.text()
+            if is_batch and key == Qt.Key_Up and cursor.atBlockStart():
+                self._jump(cursor, -1)
+                return True
 
-                m = NUMBER_PREFIX_RE.match(text)
-                min_pos = m.end() if m else 0
-                pos = cursor.positionInBlock()
-
-                # Shift + Enter → próxima entry
-                if key in (Qt.Key_Return, Qt.Key_Enter) and mods & Qt.ShiftModifier:
-                    self._jump_to_next_entry(cursor)
-                    return True
-
-                # Proteção do prefixo
-                if pos < min_pos:
-                    self._ensure_cursor_after_prefix()
-                    return True
-
-                if key == Qt.Key_Backspace and pos <= min_pos:
-                    return True
-                if key == Qt.Key_Delete and pos < min_pos:
-                    return True
-
-                # Enter → commit
-                if key in (Qt.Key_Return, Qt.Key_Enter):
-                    self._commit_translation()
-                    return True
-
-                # Undo / Redo globais
-                if key == Qt.Key_Z and mods & Qt.ControlModifier:
-                    self._call_main_window("undo")
-                    return True
-                if key == Qt.Key_Y and mods & Qt.ControlModifier:
-                    self._call_main_window("redo")
-                    return True
-
-                # Ctrl + ↑
-                if key == Qt.Key_Up and mods & Qt.ControlModifier:
-                    self.request_prev.emit()
-                    return True
+            if key in (Qt.Key_Return, Qt.Key_Enter) and not mods:
+                self._commit_translation()
+                return True
 
         return super().eventFilter(obj, event)
 
-    # -------------------------------------------------
-    # Cursor helpers
-    # -------------------------------------------------
+    # ================= NAV =================
 
-    def _ensure_cursor_after_prefix(self):
-        cursor = self.translation_edit.textCursor()
+    def _jump(self, cursor, delta: int):
         block = cursor.block()
-        text = block.text()
-
-        m = NUMBER_PREFIX_RE.match(text)
-        if not m:
-            return
-
-        min_pos = block.position() + m.end()
-        if cursor.position() < min_pos:
-            cursor.setPosition(min_pos)
+        target = block.next() if delta > 0 else block.previous()
+        if target.isValid():
+            cursor.setPosition(target.position())
             self.translation_edit.setTextCursor(cursor)
 
-    def _jump_to_next_entry(self, cursor: QTextCursor):
-        if not self._entries or len(self._entries) <= 1:
-            return
-
-        block_index = cursor.blockNumber()
-        entry_index = block_index // 2
-        next_index = entry_index + 1
-
-        if next_index >= len(self._entries):
-            return
-
-        target_block = self.translation_edit.document().findBlockByNumber(
-            next_index * 2
-        )
-
-        if not target_block.isValid():
-            return
-
-        text = target_block.text()
-        m = NUMBER_PREFIX_RE.match(text)
-        pos = target_block.position() + (m.end() if m else 0)
-
-        cursor.setPosition(pos)
-        self.translation_edit.setTextCursor(cursor)
-
-    def _call_main_window(self, method: str):
-        win = self.window()
-        if win and hasattr(win, method):
-            getattr(win, method)()
-
-    # -------------------------------------------------
-    # Commit FINAL (CORRETO)
-    # -------------------------------------------------
+    # ================= COMMIT =================
 
     def _commit_translation(self):
-        if not self._entries:
-            return
+        lines = [l.rstrip() for l in self.translation_edit.toPlainText().splitlines()]
 
-        raw = self.translation_edit.toPlainText()
-        if not raw.strip():
-            return
-
-        def clean(text: str) -> str:
-            # 🔒 REMOVE SOMENTE O PREFIXO [n]
-            return NUMBER_PREFIX_RE.sub("", text).strip()
-
-        entries = self._entries
-
-        blocks = [
-            clean(b)
-            for b in raw.split("\n\n")
-            if clean(b)
-        ]
-
-        if len(entries) > 1 and any(e.translation for e in entries):
+        if len(lines) != len(self._entries):
             QMessageBox.warning(
                 self,
                 "Tradução em lote",
-                "Uma ou mais linhas já possuem tradução.\n"
-                "Operação cancelada para evitar sobrescrita.",
-            )
-            return
-
-        if len(entries) == 1:
-            texts = [clean(raw)]
-        elif len(blocks) == 1:
-            texts = [blocks[0]] * len(entries)
-        elif len(blocks) == len(entries):
-            texts = blocks
-        else:
-            QMessageBox.warning(
-                self,
-                "Tradução em lote",
-                "Número de blocos não corresponde às linhas selecionadas.",
+                "Número de linhas não corresponde às entradas.",
             )
             return
 
         undo_actions = []
 
-        for entry, new_text in zip(entries, texts):
-            old_text = entry.translation
-            old_status = entry.status
-
-            new_status = (
-                TranslationStatus.TRANSLATED
-                if new_text else TranslationStatus.UNTRANSLATED
-            )
-
-            if old_text == new_text and old_status == new_status:
+        for entry, new_text in zip(self._entries, lines):
+            if entry.translation == new_text:
                 continue
 
             undo_actions.append(
                 UndoAction(
                     entry_id=entry.entry_id,
                     field="translation",
-                    old_value=old_text,
+                    old_value=entry.translation,
                     new_value=new_text,
                 )
             )
@@ -294,8 +228,8 @@ class EditorPanel(QWidget):
                 UndoAction(
                     entry_id=entry.entry_id,
                     field="status",
-                    old_value=old_status,
-                    new_value=new_status,
+                    old_value=entry.status,
+                    new_value=TranslationStatus.TRANSLATED,
                 )
             )
 
@@ -306,7 +240,7 @@ class EditorPanel(QWidget):
             CompositeUndoAction(undo_actions)
         )
 
-        for entry, text in zip(entries, texts):
+        for entry, text in zip(self._entries, lines):
             StatusService.on_translation_committed(entry, text)
 
         self.entry_changed.emit()

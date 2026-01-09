@@ -1,5 +1,4 @@
 from typing import List
-import re
 
 from PySide6.QtCore import (
     Qt,
@@ -18,15 +17,6 @@ from sekai_translator.core import TranslationEntry, TranslationStatus
 # ============================================================
 
 def clean_engine_syntax(text: str) -> str:
-    """
-    Remove APENAS delimitadores externos de engine para exibição.
-    NÃO altera o conteúdo real.
-
-    Exemplos:
-    "texto"              -> texto
-    [[texto]]            -> texto
-    [["texto"]]          -> "texto"
-    """
     if not text:
         return ""
 
@@ -49,7 +39,7 @@ class TranslationTableModel(QAbstractTableModel):
 
     advance_requested = Signal(int)
 
-    HEADERS = ["#", "Original", "Tradução"]
+    BASE_HEADERS = ["#", "Original", "Tradução"]
 
     def __init__(self, entries: List[TranslationEntry]):
         super().__init__()
@@ -60,13 +50,35 @@ class TranslationTableModel(QAbstractTableModel):
             if e.context.get("is_translatable", False)
         ]
 
+        # 🔑 Só ativa se houver speaker (KiriKiri)
+        self.has_speaker = any(
+            e.context.get("speaker") for e in self.entries
+        )
+
+    # ---------------- Headers ----------------
+
+    @property
+    def headers(self):
+        if self.has_speaker:
+            return ["#", "Personagem", "Original", "Tradução"]
+        return self.BASE_HEADERS
+
     # ---------------- Qt basics ----------------
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return len(self.entries)
 
     def columnCount(self, parent=QModelIndex()) -> int:
-        return len(self.HEADERS)
+        return len(self.headers)
+
+    def headerData(self, section, orientation, role):
+        if (
+            orientation == Qt.Horizontal
+            and role == Qt.DisplayRole
+            and section < len(self.headers)
+        ):
+            return self.headers[section]
+        return None
 
     # ---------------- Data ----------------
 
@@ -77,8 +89,10 @@ class TranslationTableModel(QAbstractTableModel):
         entry = self.entries[index.row()]
         col = index.column()
 
-        # ---------------- VISUAL ----------------
+        # ---------------- Display ----------------
         if role == Qt.DisplayRole:
+
+            # #
             if col == 0:
                 if entry.qa_issues:
                     if any(i.level == "error" for i in entry.qa_issues):
@@ -86,9 +100,17 @@ class TranslationTableModel(QAbstractTableModel):
                     return f"⚠️ {index.row() + 1}"
                 return index.row() + 1
 
+            # Personagem (KiriKiri)
+            if self.has_speaker:
+                if col == 1:
+                    return entry.context.get("speaker", "") or ""
+                col -= 1
+
+            # Original
             if col == 1:
                 return clean_engine_syntax(entry.original)
 
+            # Tradução
             if col == 2:
                 return clean_engine_syntax(entry.translation)
 
@@ -109,14 +131,13 @@ class TranslationTableModel(QAbstractTableModel):
             }.get(entry.status)
 
         # ---------------- Font ----------------
-        if role == Qt.FontRole and entry.status == TranslationStatus.UNTRANSLATED:
+        if role == Qt.FontRole:
             font = QFont()
-            font.setItalic(True)
+            if entry.status == TranslationStatus.UNTRANSLATED:
+                font.setItalic(True)
+            if self.has_speaker and index.column() == 1:
+                font.setBold(True)
             return font
-
-        # ---------------- Alignment ----------------
-        if role == Qt.TextAlignmentRole and col == 0:
-            return Qt.AlignLeft | Qt.AlignVCenter
 
         return None
 
@@ -126,7 +147,12 @@ class TranslationTableModel(QAbstractTableModel):
         if not index.isValid():
             return False
 
-        if index.column() == 2 and role == Qt.EditRole:
+        col = index.column()
+        if self.has_speaker:
+            col -= 1
+
+        # Tradução
+        if col == 2 and role == Qt.EditRole:
             entry = self.entries[index.row()]
             entry.translation = value
 
@@ -135,7 +161,6 @@ class TranslationTableModel(QAbstractTableModel):
                 self.index(index.row(), self.columnCount() - 1),
             )
 
-            # ENTER = próxima linha
             self.advance_requested.emit(index.row())
             return True
 
@@ -146,7 +171,12 @@ class TranslationTableModel(QAbstractTableModel):
             return Qt.NoItemFlags
 
         flags = Qt.ItemIsSelectable | Qt.ItemIsEnabled
-        if index.column() == 2:
+
+        col = index.column()
+        if self.has_speaker:
+            col -= 1
+
+        if col == 2:
             flags |= Qt.ItemIsEditable
 
         return flags
@@ -155,10 +185,16 @@ class TranslationTableModel(QAbstractTableModel):
 
     def refresh(self):
         self.beginResetModel()
+
         self.entries = [
             e for e in self.all_entries
             if e.context.get("is_translatable", False)
         ]
+
+        self.has_speaker = any(
+            e.context.get("speaker") for e in self.entries
+        )
+
         self.endResetModel()
 
 
@@ -167,6 +203,19 @@ class TranslationTableModel(QAbstractTableModel):
 # ============================================================
 
 class TranslationTableView(QTableView):
+
+    def apply_layout(self, has_speaker: bool):
+        header = self.horizontalHeader()
+
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+
+        if has_speaker:
+            header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(2, QHeaderView.Stretch)
+            header.setSectionResizeMode(3, QHeaderView.Stretch)
+        else:
+            header.setSectionResizeMode(1, QHeaderView.Stretch)
+            header.setSectionResizeMode(2, QHeaderView.Stretch)
 
     def __init__(self):
         super().__init__()
@@ -177,11 +226,6 @@ class TranslationTableView(QTableView):
         self.setWordWrap(False)
 
         self.verticalHeader().setVisible(False)
-
-        header = self.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
 
         self.setEditTriggers(
             QTableView.DoubleClicked

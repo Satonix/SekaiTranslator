@@ -1,6 +1,6 @@
 from sekai_translator.parsers.artemis import ArtemisParser
 from sekai_translator.parsers.siglus import SiglusParser
-
+from sekai_translator.parsers.kirikiri import KirikiriParser
 # --------------------------------------------------
 # Normalização de idioma
 # --------------------------------------------------
@@ -34,6 +34,7 @@ def normalize_language(lang: str) -> str:
 PARSERS = [
     ArtemisParser,
     SiglusParser,
+    KirikiriParser,
 ]
 
 
