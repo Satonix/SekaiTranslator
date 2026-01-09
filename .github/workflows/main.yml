@@ -30,17 +30,17 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
-      # 4️⃣ Build app
+      # 4️⃣ Build app (USA O .SPEC → ÍCONE + ASSETS)
       - name: Build SekaiTranslator
         run: |
-          python -m PyInstaller main.py --noconsole --name SekaiTranslator
+          python -m PyInstaller SekaiTranslator.spec
 
       # 5️⃣ Build updater
       - name: Build updater
         run: |
           python -m PyInstaller updater.py --noconsole --name updater
 
-      # 6️⃣ Copiar updater
+      # 6️⃣ Copiar updater para a pasta do app
       - name: Copy updater into app folder
         run: |
           copy dist\updater\updater.exe dist\SekaiTranslator\updater.exe
@@ -56,7 +56,7 @@ jobs:
         run: |
           choco install innosetup -y
 
-      # 9️⃣ Criar pasta de saída
+      # 9️⃣ Criar pasta de saída do installer
       - name: Create installer output folder
         run: |
           mkdir installer
@@ -66,7 +66,7 @@ jobs:
         run: |
           iscc installer.iss
 
-      # 1️⃣1️⃣ Publicar no Release  ✅ AQUI ESTÁ A CORREÇÃO
+      # 1️⃣1️⃣ Publicar no GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
